@@ -20,6 +20,23 @@ use std::hashmap::HashMap;
 use std::to_bytes;
 use std::uint;
 
+/**
+ * Url abstracts urls with transparent unicode support.
+ *
+ * Url uses the subset of Iternationalized Resource Identifiers
+ * which would be identified as Iternationalized Resource Locators
+ * should such a standard have been defined.
+ *
+ * This is to say that Url stores all non-scheme components
+ * of urls as unicode. Upon stringification the unicode is then
+ * encoded to match the Url's scheme's encoding format. Thus Url
+ * supports unicode by default with transparent compatability with
+ * Urls which by standardization do not support straight unicode.
+ *
+ * If a usage supports unicode in urls, which would be known as
+ * irls, then GetIrlStr() may be used. Avoid using GetIrlStr() in cases where
+ * simularities of unicode chars can open phising attacks on users.
+ */
 #[deriving(Clone, Eq)]
 struct Url {
     scheme: ~str,
@@ -57,6 +74,10 @@ impl Url {
             query: query,
             fragment: fragment,
         }
+    }
+
+    pub fn GetIrlStr() -> ~str {
+        // TODO: impl
     }
 }
 
@@ -1068,4 +1089,16 @@ mod tests {
         assert_eq!(form.get_ref(&~"foo bar"), &~[~"abc", ~"12 = 34"]);
         */
     }
-}
+
+    #[test]
+    fn test_urlpunycode_encoding() {
+        let raw = ~"exampleis例injpneseたぶん";
+        let punycoded = ~"xn--exampleisinjpnese-cd4pvnktn613c";
+        assert_eq!(urlpunycode_encode(raw), punycoded);
+    }
+
+    #[test]
+    fn test_urlpunycode_idempotence() {
+        let raw = ~"Thisis私の初contribution";
+        assert_eq(urlpunycode_decode(urlpunycode_encode(raw)), raw);
+    }
