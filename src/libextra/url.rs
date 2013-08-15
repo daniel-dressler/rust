@@ -77,7 +77,7 @@ impl Url {
     }
 
     pub fn GetIrlStr() -> ~str {
-        // TODO: impl
+        ~"todo"
     }
 }
 
@@ -307,6 +307,189 @@ pub fn decode_form_urlencoded(s: &[u8]) -> HashMap<~str, ~[~str]> {
     }
 }
 
+/// Implements punycode encoding from RFC 3492
+fn punycode_str_encode(s: &str) -> ~str {
+    // extract the unicode only chars
+    let mut to_be_punycoded = ~[(char, int)];
+    let mut ansi_portion = ~"";
+    for (ch, i) in s.each_char() {
+        if ch < 128 {
+            // ansi
+            ansi_portion += ch;
+        } else {
+            // unicode
+            to_be_punycoded += (ch, i);
+        }
+    }
+
+    // generate punycode for all unicode
+    let mut puny_portion = ~"";
+    for (ch, i) in to_be_punycoded {
+        //puny_portion += 
+    }
+    
+    ansi_portion
+}
+
+/// Provides punycode decoding from RFC 3492.
+/// This function is a rust implementation
+/// of the pseudocode defined in RFC 3492 
+/// section 6.2
+fn punycode_str_decode(s: &str) -> ~str {
+    // punycode is a specific configuration of bootstring coding
+    let base = 36;
+    let tmin = 1;
+    let tmax = 26;
+    let skew = 38;
+    let damp = 700;
+    let bias_init = 72;
+    let n_init = 128;
+    let delimiter = '-';
+
+    // find delimiter
+    let mut delimiter_index = 0;
+    for (ch, i) in s.each_char_reverse() {
+        if ch == delimiter {
+            delimiter_index = i;
+            break;
+        }
+    }
+    let mut decoded = s.substr(0, delimiter_index).chars();
+    let dfsm_feed = s.substr(delimiter_index + 1, s.char_len()).to_upper().char_iter;
+        
+
+    // prime the finite state machine
+    let mut chars_coded = decoded.char_len + 1;
+    let mut delta = 0;
+    let mut bias = bias_init;
+    let mut i:i64 = 0;
+    let mut n = n_init;
+
+    // run the state machine until we run out of state transitions
+    // I can only point to the RFC if one has questions here
+    do io::with_str_reader(dfsm_feed) |dfsm_rdr| {
+        let mut is_done = false;
+        while !is_done {
+            let i_old = i;
+            let w:i64 = 1;
+            let k:i64 = 0;
+            loop {
+                k += base;
+                if k < 0 {
+                    return Err("Encoded punycode cause overflow in `k`");
+                }
+
+                if dfsm_rdr.eof() {
+                    return Err("Expected char to consume, non present");
+                }
+                let ch = dfsm_rdr.read_char();
+                let digit = match ch {
+                    'A' .. 'Z' => {
+                        ch.to_digit() - 10
+                    }
+                    '0' .. '9' => {
+                        ch.to_digit() + 26
+                    }
+                };
+
+                i = i + digit * w;
+                if i < 0 {
+                    return Err("Encoded punycode caused overflow in `i`");
+                }
+                
+                let t =
+                    if (k <= bias + tmin) { tmin }
+                    else if (k >= bias + tmax) { tmax }
+                    else { k };
+
+                if digit < t {
+                    break;
+                }
+
+                w = w * (base - t);
+                if w < 0 {
+                    return Err("Encoded punycode caused overflow in `w`");
+                }
+            }
+            
+            bias = adapt(i - i_old, chars_coded + 1, i_old == 0);
+            n = n + i / (chars_coded + 1);
+            if n < 0 {
+                return Err("Encoded punycode caused overflow in `n`");
+            }
+
+            i = i % (chars_coded + 1);
+
+            // insert codepoint `n` at pos i
+            decoded.insert(i, n);
+            chars_coded += 1;
+
+            i += 1;
+            is_done = dfsm_rdr.eof();
+        }
+    }
+
+    return decoded;
+}
+
+fn adapt(mut delta: uint, chars_coded: uint, first_time: bool) {
+    if (first_time) {
+        delta /= 700;
+    } else {
+        delta /= 2;
+    }
+    delta += (delta / chars_coded);
+    let mut k = 0;
+    while (delta > ((36 - 1) * 26) / 2) {
+        delta /= 36 - 1;
+        k += 36;
+    }
+    return k + (((36 - 1 + 1) * delta) / (delta + 38))
+}
+        
+
+fn punycode_domain_encode(s: &str) -> ~str {
+    // all ansi str are not punycoded
+    let is_ansi = true;
+    do io::with_str_reader(s) |rdr| {
+        while !rdr.eof() {
+            let char = rdr.read_char();
+            // unicode's first 2^7 values
+            // match ansii
+            if char >= 2<<7 {
+                is_ansi = false;
+            }
+        }
+    }
+    if is_ansi {
+        return s;
+    }
+
+    // find domain name and tld
+    // only domain name will get puny'd
+    let mut tld_index = s.char_len;
+    let mut name_index = 0;
+    let mut tld_found = false;
+    for (ch, i) in s.each_char_reverse {
+        // handles
+        // f.o.o.domainname.com
+        if ch == '.' {
+            if !tld_found {
+                tld_index -= i;
+                tld_found = true;
+            } else {
+                name_index = s.char_len - i;
+                break;
+            }
+        }
+    }
+    let domain_name = s.substr(name_index, tld_index);
+        
+            
+
+    //~"xn--" + ansi_portion + '-' + puny_portion + '.' + tld
+    return "";
+}
 
 fn split_char_first(s: &str, c: char) -> (~str, ~str) {
     let len = s.len();
@@ -1102,3 +1285,11 @@ mod tests {
         let raw = ~"Thisis私の初contribution";
         assert_eq(urlpunycode_decode(urlpunycode_encode(raw)), raw);
     }
+
+    #[test]
+    fn test_punycode_decoding() {
+        let coded = "-with-super-monkeys-pc58ag80a8qai00g7n9n";
+        let decoded = "安室奈美恵-with-SUPER-MONKEYS";
+        assert_eq(punycode_decode(coded), decoded);
+    }
+}
